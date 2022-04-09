@@ -1,0 +1,53 @@
+---
+title: "Solucion"
+author: "Daniel Ranchal Parrado"
+date: "`r Sys.Date()`"
+output:
+    html_notebook: default
+    pdf_document: default
+---
+
+```{r}
+require(tseries)
+require(DAAG)
+```
+
+## Carga de los datos
+
+Si se observa el contenido del fichero, se puede inferir que hay 5 observaciones por unidad de tiempo siendo cada línea una unidad de tiempo. El objetivo es predecir los dos siguientes valores de esta serie temporal.
+
+```{r engine='bash', comment=''}
+cat dataseries.dat
+```
+
+Primero se lee el fichero con la función scan A continuación se construye un objeto de serie temporal ts especificando los datos del fichero y la frecuencia de la serie, que en este caso es 5.
+
+```{r}
+serie <- scan("dataseries.dat")
+serie.ts <- ts(serie, frequency = 5)
+plot(serie.ts)
+```
+
+En el siguiente gráfico se puede observar la serie temporal descompuesta en tendencia, estacionalidad y el resto. En el resto se puede apreciar que la varianza apenas varía a lo largo de la serie. Por lo tanto no habría que aplicar transformaciones de tipo logarítmica a esta serie.
+
+```{r}
+serie.ts.decomposed <- decompose(serie.ts)
+plot(serie.ts.decomposed)
+```
+
+
+
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
