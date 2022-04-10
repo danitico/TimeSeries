@@ -2129,16 +2129,14 @@ alternative hypothesis: stationary</code></pre>
 <!-- rnb-text-begin -->
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuYXJpbWEubW9kZWwgPC0gYXJpbWEoXG4gICAgc2VyaWUudHMudGVzdC53aXRob3V0LnRyZW5kLnNlYXNvbixcbiAgICBvcmRlciA9IGMoMSwgMSwgMylcbilcbmBgYCJ9 -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuYXJpbWEubW9kZWwgPC0gYXJpbWEoXG4gICAgc2VyaWUudHMudGVzdC53aXRob3V0LnRyZW5kLnNlYXNvbixcbiAgICBvcmRlciA9IGMoMCwgMSwgMylcbilcblxucHJlZGljdGlvbnMgPC0gcHJlZGljdChhcmltYS5tb2RlbCwgbi5haGVhZCA9IDIpXG5gYGAifQ== -->
 <pre class="r"><code>arima.model &lt;- arima(
     serie.ts.test.without.trend.season,
-    order = c(1, 1, 3)
-)</code></pre>
+    order = c(0, 1, 3)
+)
+
+predictions &lt;- predict(arima.model, n.ahead = 2)</code></pre>
 <!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiRXJyb3IgaW4gb3B0aW0oaW5pdFttYXNrXSwgYXJtYUNTUywgbWV0aG9kID0gb3B0aW0ubWV0aG9kLCBoZXNzaWFuID0gRkFMU0UsICA6IFxuICBpbml0aWFsIHZhbHVlIGluICd2bW1pbicgaXMgbm90IGZpbml0ZVxuIn0= -->
-<pre><code>Error in optim(init[mask], armaCSS, method = optim.method, hessian = FALSE,  : 
-  initial value in &#39;vmmin&#39; is not finite</code></pre>
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 <!-- rnb-text-end -->
