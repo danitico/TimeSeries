@@ -12,7 +12,7 @@ require(tseries)
 require(DAAG)
 ```
 
-## Carga de los datos
+## Carga de los datos y preprocesamiento
 
 Si se observa el contenido del fichero, se puede inferir que hay 5 observaciones por unidad de tiempo siendo cada línea una unidad de tiempo. El objetivo es predecir los dos siguientes valores de esta serie temporal.
 
@@ -35,19 +35,139 @@ serie.ts.decomposed <- decompose(serie.ts)
 plot(serie.ts.decomposed)
 ```
 
+## División del problema en entrenamiento y test
+
+A continuación se procede a dividir el conjunto de datos en dos, uno para entrenamiento y otro para test. Siempre
+se recomienda que el tamaño del conjunto de test tenga al menos el mismo tamaño que los valores siguientes que queremos predecir de la serie. Como en este caso se pide que se calculen los dos siguientes valores, se fijará un conjunto de test de dos elementos.
+En el siguiente gráfico se puede ver en color negro los datos de entrenamiento y en color rojo los datos de test.
 
 
+```{r}
+test.size = 2
 
-```{r cars}
-summary(cars)
+serie.ts.train <- serie.ts[1:(length(serie.ts) - test.size)]
+serie.ts.train.time <- 1:length(serie.ts.train)
+
+serie.ts.test <- serie.ts[(length(serie.ts) - test.size + 1):length(serie.ts)]
+serie.ts.test.time <- (serie.ts.train.time[length(serie.ts.train.time)] + 1):(serie.ts.train.time[length(serie.ts.train.time)] + test.size)
+
+plot.ts(serie.ts.train)
+lines(serie.ts.test.time, serie.ts.test, col="red")
 ```
 
-## Including Plots
+## Análisis de la serie
 
-You can also embed plots, for example:
+En esta sección se procede a analizar la serie de manera visual. Como se puede observar en la descomposición de la serie temporal, se aprecia tendencia en la serie temporal, y se asume en un principio que es una tendencia lineal. Sin embargo, en las siguientes secciones se comprobará mediante tests estadísticos si estamos en lo cierto o no.
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+Respecto a la estacionalidad, en la componente "seasonal" se puede asumir una estacionalidad cada 5 unidades de tiempo, tal y como se ha especificado al crear el objeto ts. De todas maneras, habrá que comprobar esta hipótesis comprobando el gráfico ACF de la serie.
+
+```{r}
+plot(serie.ts.decomposed)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+## Tendencia
+
+Primero de todo, vamos a ver el gráfico de autocorrelación de la serie para comprobar que realmente existe tendencia en la serie. Como se puede observar, los valores en cada lag se reducen "lentamente", indicativo de que existe tendencia.
+
+```{r}
+acf(serie.ts.train)
+```
+
+
+A continuación vamos a asumir que la tendencia lineal para luego comprobar con un test estadístico para comprobar si la hipótesis de que se puede modelar con una tendencia lineal se acepta.
+
+```{r warning=FALSE}
+parametros.trend <- lm(
+    serie.ts.train ~ serie.ts.train.time
+)
+
+trend.estimated.train <- predict(
+    parametros.trend
+)
+trend.estimated.test <- predict(
+    parametros.trend,
+    newdata = data.frame(
+        serie.ts.train.time=serie.ts.test.time
+    )
+)
+#trend.estimated.train <- parametros.trend$coefficients[1] + parametros.trend$coefficients[2]*serie.ts.train.time
+#trend.estimated.test <- parametros.trend$coefficients[1] + parametros.trend$coefficients[2]*serie.ts.test.time
+
+plot.ts(serie.ts.train, xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)]))
+lines(serie.ts.train.time, trend.estimated.train, col="blue")
+lines(serie.ts.test.time, serie.ts.test, col="red")
+lines(serie.ts.test.time, trend.estimated.test, col="green")
+```
+
+```{r}
+jarque.bera.test(parametros.trend$residuals)
+jarque.bera.test(trend.estimated.test - serie.ts.test)
+
+t.test(c(parametros.trend$residuals, trend.estimated.test - serie.ts.test))
+```
+
+```{r}
+serie.ts.train.without.trend <- serie.ts.train - trend.estimated.train
+serie.ts.test.without.trend <- serie.ts.test - trend.estimated.test
+
+plot.ts(
+    serie.ts.train.without.trend,
+    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
+)
+lines(serie.ts.test.time, serie.ts.test.without.trend, col="red")
+```
+
+
+```{r}
+acf(serie.ts.train.without.trend)
+```
+
+
+## Estacionalidad
+
+```{r}
+seasonality_feature <- decompose(serie.ts)$seasonal
+
+serie.ts.train.without.trend.season <- serie.ts.train.without.trend - seasonality_feature[1:length(serie.ts.train.without.trend)]
+
+serie.ts.test.without.trend.season <- serie.ts.test.without.trend - seasonality_feature[(length(serie.ts.train.without.trend) + 1):length(serie.ts)]
+
+plot.ts(
+    serie.ts.train.without.trend.season,
+    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
+)
+lines(serie.ts.test.time, serie.ts.test.without.trend.season, col="red")
+```
+
+## Estacionareidad
+
+```{r}
+adf.test(serie.ts.train.without.trend.season)
+acf(serie.ts.train.without.trend.season)
+
+serie.ts.train.without.trend.season.diff <- diff(serie.ts.train.without.trend.season)
+adf.test(serie.ts.train.without.trend.season.diff)
+acf(serie.ts.train.without.trend.season.diff)
+```
+
+# Modelo ARIMA
+
+p -> 1
+d-> 1
+q -> 3
+
+```{r}
+acf(serie.ts.train.without.trend.season.diff)
+pacf(serie.ts.train.without.trend.season.diff)
+```
+
+```{r}
+arima.model <- arima(
+    serie.ts.test.without.trend.season,
+    order = c(0, 1, 3)
+)
+
+predictions <- predict(arima.model, n.ahead = 2)
+```
+
+
