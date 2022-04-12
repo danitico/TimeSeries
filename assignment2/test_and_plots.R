@@ -12,29 +12,15 @@ offline <- data.frame(
     check.names = F
 )
 
-# Normalización datos para evitar empates en wilcoxon
-
-diffs <- (offline$Hoeffding - offline$`Hoeffding adaptativo`) / offline$Hoeffding
-wilcoxon <- cbind(
-    ifelse(
-        diffs<0,
-        abs(diffs)+0.1,
-        0+0.1
-    ),
-    ifelse(
-        diffs>0,
-        abs(diffs)+0.1,
-        0+0.1
-    )
-)
-
 wilcox.test(
-    wilcoxon[, 1],
-    wilcoxon[, 2],
+    offline$Hoeffding,
+    offline$`Hoeffding adaptativo`,
     alternative = "two.sided",
     paired = TRUE
 )
 
+median(offline$Hoeffding)
+median(offline$`Hoeffding adaptativo`)
 
 offline %>% gather(
     "Variables",
@@ -61,28 +47,15 @@ online <- data.frame(
     check.names = F
 )
 
-# Normalización datos para evitar empates en wilcoxon
-
-diffs <- (online$Hoeffding - online$`Hoeffding adaptativo`) / online$Hoeffding
-wilcoxon <- cbind(
-    ifelse(
-        diffs<0,
-        abs(diffs)+0.1,
-        0+0.1
-    ),
-    ifelse(
-        diffs>0,
-        abs(diffs)+0.1,
-        0+0.1
-    )
-)
-
 wilcox.test(
-    wilcoxon[, 1],
-    wilcoxon[, 2],
+    online$Hoeffding,
+    online$`Hoeffding adaptativo`,
     alternative = "two.sided",
     paired = TRUE
 )
+
+median(online$Hoeffding)
+median(online$`Hoeffding adaptativo`)
 
 
 online %>% gather(
@@ -111,28 +84,15 @@ online_drift <- data.frame(
     check.names = F
 )
 
-# Normalización datos para evitar empates en wilcoxon
-
-diffs <- (online_drift$Hoeffding - online_drift$`Hoeffding adaptativo`) / online_drift$Hoeffding
-wilcoxon <- cbind(
-    ifelse(
-        diffs<0,
-        abs(diffs)+0.1,
-        0+0.1
-    ),
-    ifelse(
-        diffs>0,
-        abs(diffs)+0.1,
-        0+0.1
-    )
-)
-
 wilcox.test(
-    wilcoxon[, 1],
-    wilcoxon[, 2],
+    online_drift$Hoeffding,
+    online_drift$`Hoeffding adaptativo`,
     alternative = "two.sided",
     paired = TRUE
 )
+
+median(online_drift$Hoeffding)
+median(online_drift$`Hoeffding adaptativo`)
 
 online_drift %>% gather(
     "Variables",
@@ -153,34 +113,33 @@ online_drift %>% gather(
 prequential_hoeffding_online_drift <- scan("prequential_hoeffding_online_drift.txt")
 prequential_hoeffding_adaptativo_online_drift <- scan("prequential_hoeffding_adaptativo_online_drift.txt")
 
-prequential_online_drift <- data.frame(
-    "Hoeffding"=prequential_hoeffding_online_drift,
-    "Hoeffding adaptativo"=prequential_hoeffding_adaptativo_online_drift,
+hoeffding.NoPrequentialVsPrequential <- data.frame(
+    "Hoeffding sin prequential"=hoeffding_online_drift,
+    "Hoeffding con prequential"=prequential_hoeffding_online_drift,
     check.names = F
 )
 
-diffs <- (prequential_online_drift$Hoeffding - prequential_online_drift$`Hoeffding adaptativo`) / prequential_online_drift$Hoeffding
-wilcoxon <- cbind(
-    ifelse(
-        diffs<0,
-        abs(diffs)+0.1,
-        0+0.1
-    ),
-    ifelse(
-        diffs>0,
-        abs(diffs)+0.1,
-        0+0.1
-    )
+hoeffding.adaptativo.NoPrequentialVsPrequential <- data.frame(
+    "Hoeffding adaptativo sin prequential"=hoeffding_adaptativo_online_drift,
+    "Hoeffding adaptativo con prequential"=prequential_hoeffding_adaptativo_online_drift,
+    check.names = F
 )
 
 wilcox.test(
-    wilcoxon[, 1],
-    wilcoxon[, 2],
+    hoeffding.NoPrequentialVsPrequential$`Hoeffding sin prequential`,
+    hoeffding.NoPrequentialVsPrequential$`Hoeffding con prequential`,
     alternative = "two.sided",
     paired = TRUE
 )
 
-prequential_online_drift %>% gather(
+wilcox.test(
+    hoeffding.adaptativo.NoPrequentialVsPrequential$`Hoeffding adaptativo sin prequential`,
+    hoeffding.adaptativo.NoPrequentialVsPrequential$`Hoeffding adaptativo con prequential`,
+    alternative = "two.sided",
+    paired = TRUE
+)
+
+hoeffding.NoPrequentialVsPrequential %>% gather(
     "Variables",
     "Values"
 ) %>% ggplot(
@@ -189,12 +148,25 @@ prequential_online_drift %>% gather(
 ) + geom_boxplot() + facet_wrap(
     ~ Variables
 ) + labs(
-    title="Entrenamiento online en datos con concept drift. Olvido de instancias",
+    title="Hoeffding Con prequential vs Sin prequential",
+    y="Porcentaje de acierto"
+)
+
+hoeffding.adaptativo.NoPrequentialVsPrequential %>% gather(
+    "Variables",
+    "Values"
+) %>% ggplot(
+    .,
+    aes(y=Values)
+) + geom_boxplot() + facet_wrap(
+    ~ Variables
+) + labs(
+    title="Hoeffding adaptativo Con prequential vs Sin prequential",
     y="Porcentaje de acierto"
 )
 
 
-## Prequential
+## Single classifier drift
 
 single_classifier_drift_hoeffding_online_drift <- scan("single_classifier_drift_hoeffding_online_drift.txt")
 single_classifier_drift_hoeffding_adaptativo_online_drift <- scan("single_classifier_drift_hoeffding_adaptativo_online_drift.txt")
