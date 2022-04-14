@@ -57,9 +57,9 @@ lines(serie.ts.test.time, serie.ts.test, col="red")
 
 ## Análisis de la serie
 
-En esta sección se procede a analizar la serie de manera visual. Como se puede observar en la descomposición de la serie temporal, se aprecia tendencia en la serie temporal, y se asume en un principio que es una tendencia lineal. Sin embargo, en las siguientes secciones se comprobará mediante tests estadísticos si estamos en lo cierto o no.
+En esta sección se procede a analizar la serie de manera visual. Como se puede observar en la descomposición de la serie temporal, se aprecia tendencia en la serie temporal. Sin embargo, en las siguientes secciones se podrá ver en el gráfico ACF si estamos en lo cierto.
 
-Respecto a la estacionalidad, en la componente "seasonal" se puede asumir una estacionalidad cada 5 unidades de tiempo, tal y como se ha especificado al crear el objeto ts. De todas maneras, habrá que comprobar esta hipótesis comprobando el gráfico ACF de la serie.
+Respecto a la estacionalidad, en la componente "seasonal" se ha asumido una estacionalidad cada 5 unidades de tiempo, tal y como se ha especificado al crear el objeto ts. De todas maneras, habrá que comprobar esta hipótesis comprobando el gráfico ACF de la serie.
 
 ```{r}
 plot(serie.ts.decomposed)
@@ -73,25 +73,46 @@ Primero de todo, vamos a ver el gráfico de autocorrelación de la serie para co
 acf(serie.ts.train)
 ```
 
+Como se ha visto en la descomposición aditiva de la serie, la tendencia no es lineal y por lo tanto habrá que modelarla de otra manera. En este caso se va a estimar con un filtro de medias móviles y para evitar el problema que puede tener este método, los primeros y últimos n valores que no se pueden calcular se van a rellenar con el elemento n + 1 y el elemento longitud_serie - n - 1.
 
-A continuación vamos a asumir que la tendencia lineal para luego comprobar con un test estadístico para comprobar si la hipótesis de que se puede modelar con una tendencia lineal se acepta.
+En este caso, como la porción de test que se ha elegido son de dos elementos, estos se van a estimar con el último valor estimado de la tendencia en el conjunto de datos de entrenamiento
 
-```{r warning=FALSE}
-parametros.trend <- lm(
-    serie.ts.train ~ serie.ts.train.time
+
+```{r}
+k <- 2
+filtro <- rep(
+    1/((k*2) + 1),
+    (k*2) + 1
 )
 
-trend.estimated.train <- predict(
-    parametros.trend
+trend.estimated.train <- filter(serie.ts.train, filter = filtro, sides = 2, method = "convolution")
+
+# Manteniendo el valor más próximo
+trend.estimated.train[1:k] <- trend.estimated.train[k+1]
+trend.estimated.train[(length(trend.estimated.train) - 1):length(trend.estimated.train)] <- trend.estimated.train[length(trend.estimated.train) - k]
+
+trend.estimated.test <- ts(
+    rep(
+        trend.estimated.train[length(trend.estimated.train)],
+        test.size
+    ),
+    start = length(trend.estimated.train) + 1,
+    end = length(trend.estimated.train) + 2
 )
-trend.estimated.test <- predict(
-    parametros.trend,
-    newdata = data.frame(
-        serie.ts.train.time=serie.ts.test.time
-    )
+
+# Regresión lineal y dando el valor mas próximo para test
+
+first_n_lm <- lm(serie.ts.train[1:(k+1)] ~ serie.ts.train.time[1:(k+1)])
+trend.estimated.train[1] <- first_n_lm$fitted.values[1]
+trend.estimated.train[2] <- first_n_lm$fitted.values[2]
+
+last_n_lm <- lm(
+    serie.ts.train[(length(serie.ts.train) - k):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - k):length(serie.ts.train)]
 )
-#trend.estimated.train <- parametros.trend$coefficients[1] + parametros.trend$coefficients[2]*serie.ts.train.time
-#trend.estimated.test <- parametros.trend$coefficients[1] + parametros.trend$coefficients[2]*serie.ts.test.time
+trend.estimated.train[length(serie.ts.train) - 1] <- last_n_lm$fitted.values[2]
+trend.estimated.train[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
+
+trend.estimated.test <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
 
 plot.ts(serie.ts.train, xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)]))
 lines(serie.ts.train.time, trend.estimated.train, col="blue")
@@ -99,12 +120,17 @@ lines(serie.ts.test.time, serie.ts.test, col="red")
 lines(serie.ts.test.time, trend.estimated.test, col="green")
 ```
 
-```{r}
-jarque.bera.test(parametros.trend$residuals)
-jarque.bera.test(trend.estimated.test - serie.ts.test)
+No existen diferencias significativas en los errores de train y test cuando se modela la tendencia con un filtro de medias móviles.
 
-t.test(c(parametros.trend$residuals, trend.estimated.test - serie.ts.test))
+
+```{r}
+jarque.bera.test(trend.estimated.train - serie.ts.train)
+jarque.bera.test(trend.estimated.test - serie.ts.test)
+t.test(c(trend.estimated.train - serie.ts.train, trend.estimated.test - serie.ts.test))
 ```
+
+
+A continuación se procede a eliminar la tendencia de la serie
 
 ```{r}
 serie.ts.train.without.trend <- serie.ts.train - trend.estimated.train
@@ -112,10 +138,13 @@ serie.ts.test.without.trend <- serie.ts.test - trend.estimated.test
 
 plot.ts(
     serie.ts.train.without.trend,
-    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
+    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)]),
+    ylim=c(-1.5, 2)
 )
 lines(serie.ts.test.time, serie.ts.test.without.trend, col="red")
 ```
+
+A continuación se procede a revisar el gráfico ACF de la serie para ver si se ha eliminado correctamente la tendencia de la serie, y por lo tanto, se ha modelado bien.
 
 
 ```{r}
@@ -126,48 +155,83 @@ acf(serie.ts.train.without.trend)
 ## Estacionalidad
 
 ```{r}
-seasonality_feature <- decompose(serie.ts)$seasonal
+#seasonality_feature <- decompose(serie.ts)$seasonal
 
-serie.ts.train.without.trend.season <- serie.ts.train.without.trend - seasonality_feature[1:length(serie.ts.train.without.trend)]
+#serie.ts.train.without.trend.season <- serie.ts.train.without.trend - seasonality_feature[1:length(serie.ts.train.without.trend)]
 
-serie.ts.test.without.trend.season <- serie.ts.test.without.trend - seasonality_feature[(length(serie.ts.train.without.trend) + 1):length(serie.ts)]
+#serie.ts.test.without.trend.season <- serie.ts.test.without.trend - seasonality_feature[(length(serie.ts.train.without.trend) + 1):length(serie.ts)]
 
-plot.ts(
-    serie.ts.train.without.trend.season,
-    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
-)
-lines(serie.ts.test.time, serie.ts.test.without.trend.season, col="red")
+#plot.ts(
+#    serie.ts.train.without.trend.season,
+#    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
+#)
+#lines(serie.ts.test.time, serie.ts.test.without.trend.season, col="red")
 ```
 
 ## Estacionareidad
 
 ```{r}
-adf.test(serie.ts.train.without.trend.season)
-acf(serie.ts.train.without.trend.season)
+adf.test(serie.ts.train.without.trend)
+acf(serie.ts.train.without.trend)
 
-serie.ts.train.without.trend.season.diff <- diff(serie.ts.train.without.trend.season)
-adf.test(serie.ts.train.without.trend.season.diff)
-acf(serie.ts.train.without.trend.season.diff)
+#serie.ts.train.without.trend.diff <- diff(serie.ts.train.without.trend)
+#adf.test(serie.ts.train.without.trend.diff)
+#acf(serie.ts.train.without.trend.diff)
 ```
 
 # Modelo ARIMA
 
-p -> 1
-d-> 1
-q -> 3
+p -> 4
+d-> 0
+q -> 4
 
 ```{r}
-acf(serie.ts.train.without.trend.season.diff)
-pacf(serie.ts.train.without.trend.season.diff)
+acf(serie.ts.train.without.trend)
+pacf(serie.ts.train.without.trend)
 ```
 
 ```{r}
 arima.model <- arima(
-    serie.ts.test.without.trend.season,
-    order = c(0, 1, 3)
+    serie.ts.train.without.trend,
+    order = c(4, 0, 4)
 )
 
-predictions <- predict(arima.model, n.ahead = 2)
+valoresAjustados <- serie.ts.train.without.trend + arima.model$residuals
+
+predictions <- predict(arima.model, n.ahead = 2)$pred
+
+errorTrain <- sum((arima.model$residuals)^2)
+errorTest <- sum((predictions - serie.ts.test.without.trend)^2)
 ```
+
+
+```{r}
+plot.ts(
+    serie.ts.train.without.trend,
+    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)]),
+    ylim=c(-2, 2)
+)
+lines(valoresAjustados, col="blue")
+lines(serie.ts.test.time, serie.ts.test.without.trend, col="red")
+lines(serie.ts.test.time, predictions, col="blue")
+```
+
+```{r}
+Box.test(arima.model$residuals)
+jarque.bera.test(arima.model$residuals)
+shapiro.test(arima.model$residuals)
+hist(arima.model$residuals, col="blue", prob=T)
+lines(density(arima.model$residuals))
+```
+
+Modelando tendencia con medias moviles (MA-3) (valores NA se rellenan con el más proximo) y un 6, 0, 3 en arima AIC -> 16.05643
+Error train -> 4.635024
+Error test -> 4.737994
+
+Modelando tendencia con medias moviles (MA-5) (regresion lineal para los extremos y valor más proximo para test) y un 4, 0, 4 en arima AIC -> 92.87415
+Error train -> 10.71614
+Error test -> 0.4067225
+
+Modelando tendencia con medias moviles (MA-5) (los valores NA se rellenan con el más proximo. Test se queda con los valores del último) y un 3,0,3 en arima AIC -> 100.1031
 
 
