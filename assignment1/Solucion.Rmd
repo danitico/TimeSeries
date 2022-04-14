@@ -79,7 +79,7 @@ En este caso, como la porción de test que se ha elegido son de dos elementos, e
 
 
 ```{r}
-k <- 2
+k <- 1
 filtro <- rep(
     1/((k*2) + 1),
     (k*2) + 1
@@ -114,6 +114,16 @@ trend.estimated.train[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
 
 trend.estimated.test <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
 
+# Regresion para los puntos del final y test. MA-3
+trend.estimated.train[1] <- trend.estimated.train[2]
+
+last_n_lm <- lm(
+    serie.ts.train[(length(serie.ts.train) - 2):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - 2):length(serie.ts.train)]
+)
+trend.estimated.train[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
+trend.estimated.test <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
+
+
 plot.ts(serie.ts.train, xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)]))
 lines(serie.ts.train.time, trend.estimated.train, col="blue")
 lines(serie.ts.test.time, serie.ts.test, col="red")
@@ -139,7 +149,7 @@ serie.ts.test.without.trend <- serie.ts.test - trend.estimated.test
 plot.ts(
     serie.ts.train.without.trend,
     xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)]),
-    ylim=c(-1.5, 2)
+    ylim=c(-1.5, 2.5)
 )
 lines(serie.ts.test.time, serie.ts.test.without.trend, col="red")
 ```
@@ -181,9 +191,9 @@ acf(serie.ts.train.without.trend)
 
 # Modelo ARIMA
 
-p -> 4
+p -> 6
 d-> 0
-q -> 4
+q -> 3
 
 ```{r}
 acf(serie.ts.train.without.trend)
@@ -193,7 +203,7 @@ pacf(serie.ts.train.without.trend)
 ```{r}
 arima.model <- arima(
     serie.ts.train.without.trend,
-    order = c(4, 0, 4)
+    order = c(6, 0, 3)
 )
 
 valoresAjustados <- serie.ts.train.without.trend + arima.model$residuals
@@ -209,7 +219,7 @@ errorTest <- sum((predictions - serie.ts.test.without.trend)^2)
 plot.ts(
     serie.ts.train.without.trend,
     xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)]),
-    ylim=c(-2, 2)
+    ylim=c(-2, 3)
 )
 lines(valoresAjustados, col="blue")
 lines(serie.ts.test.time, serie.ts.test.without.trend, col="red")
@@ -233,5 +243,64 @@ Error train -> 10.71614
 Error test -> 0.4067225
 
 Modelando tendencia con medias moviles (MA-5) (los valores NA se rellenan con el más proximo. Test se queda con los valores del último) y un 3,0,3 en arima AIC -> 100.1031
+Error train -> 12.617510
+Error test -> 14.983722
+
+Modelando tendencia con medias moviles (MA-3) (valores NA se rellenan con el más proximo en el principio, regresion lineal para el ultimo valor y test) y un 6, 0, 3 en arima AIC -> 14.86745
+Error train -> 4.5593
+Error test -> 0.3562
+
+## Predicción de los dos siguientes valores
+
+```{r}
+k <- 1
+filtro <- rep(
+    1/((k*2) + 1),
+    (k*2) + 1
+)
+
+trend.estimated <- filter(serie.ts, filter = filtro, sides = 2, method = "convolution")
+
+trend.estimated[1] <- trend.estimated[2]
+serie.ts.time <- 1:length(serie.ts)
+
+last_n_lm <- lm(
+    serie.ts[(length(serie.ts) - 2):length(serie.ts)] ~ serie.ts.time[(length(serie.ts) - 2):length(serie.ts)]
+)
+trend.estimated[length(serie.ts)] <- last_n_lm$fitted.values[3]
+
+serie.ts.without.trend <- serie.ts - trend.estimated
+
+arima.model.final <- arima(
+    serie.ts.without.trend,
+    order = c(6, 0, 3)
+)
+
+final.predictions <- predict(arima.model.final, n.ahead = 2)$pred
+
+plot.ts(
+    serie.ts.without.trend[1:96],
+    xlim=c(1, serie.ts.time[length(serie.ts.time)]),
+    ylim=c(-2, 2)
+)
+valoresAjustados <- serie.ts.without.trend + arima.model.final$residuals
+lines(valoresAjustados[1:96], col="blue")
+lines(97:98, final.predictions, col="blue")
+```
+
+Las predicciones de los dos valores siguientes son: 580.1536 580.3910
+
+El AIC del modelo final es 16.47838
+
+```{r}
+trend.estimated.prediction <- last_n_lm$coefficients[1] + c(97, 98)*last_n_lm$coefficients[2]
+
+predictions.with.trend <- final.predictions + trend.estimated.prediction
+
+plot.ts(
+    serie.ts[1:96]
+)
+lines(97:98, predictions.with.trend, col="blue")
+```
 
 
