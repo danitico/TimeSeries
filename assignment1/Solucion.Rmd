@@ -20,7 +20,7 @@ Si se observa el contenido del fichero, se puede inferir que hay 5 observaciones
 cat dataseries.dat
 ```
 
-Primero se lee el fichero con la función scan A continuación se construye un objeto de serie temporal ts especificando los datos del fichero y la frecuencia de la serie, que en este caso es 5.
+Primero se lee el fichero con la función scan. A continuación se construye un objeto de serie temporal ts especificando los datos del fichero y la frecuencia de la serie, que en principio asumimos que es 5.
 
 ```{r}
 serie <- scan("dataseries.dat")
@@ -28,7 +28,7 @@ serie.ts <- ts(serie, frequency = 5)
 plot(serie.ts)
 ```
 
-En el siguiente gráfico se puede observar la serie temporal descompuesta en tendencia, estacionalidad y el resto. En el resto se puede apreciar que la varianza apenas varía a lo largo de la serie. Por lo tanto no habría que aplicar transformaciones de tipo logarítmica a esta serie.
+En el siguiente gráfico se puede observar la serie temporal descompuesta en tendencia, estacionalidad y el componente irregular. En el resto se puede apreciar que la varianza apenas varía a lo largo de la serie. Por lo tanto no habría que aplicar transformaciones de tipo logarítmica a esta serie.
 
 ```{r}
 serie.ts.decomposed <- decompose(serie.ts)
@@ -65,69 +65,239 @@ Respecto a la estacionalidad, en la componente "seasonal" se ha asumido una esta
 plot(serie.ts.decomposed)
 ```
 
-## Tendencia
+### Tendencia
 
-Primero de todo, vamos a ver el gráfico de autocorrelación de la serie para comprobar que realmente existe tendencia en la serie. Como se puede observar, los valores en cada lag se reducen "lentamente", indicativo de que existe tendencia.
+Primero de todo, vamos a ver el gráfico de autocorrelación de la serie para comprobar que realmente existe tendencia en ella. Como se puede observar, los valores en cada lag se reducen "lentamente", indicativo de que existe tendencia.
 
 ```{r}
 acf(serie.ts.train)
 ```
 
-Como se ha visto en la descomposición aditiva de la serie, la tendencia no es lineal y por lo tanto habrá que modelarla de otra manera. En este caso se va a estimar con un filtro de medias móviles y para evitar el problema que puede tener este método, los primeros y últimos n valores que no se pueden calcular se van a rellenar con el elemento n + 1 y el elemento longitud_serie - n - 1.
+Como se ha visto en la descomposición aditiva de la serie, la tendencia no es lineal y por lo tanto habrá que modelarla de otra manera. En este caso se va a estimar con un filtro de medias móviles con k = 1 y con k = 2. Para evitar el problema que puede tener este método con los primeros y últimos k valores que no se pueden calcular se van a proponer los siguientes métodos:
 
-En este caso, como la porción de test que se ha elegido son de dos elementos, estos se van a estimar con el último valor estimado de la tendencia en el conjunto de datos de entrenamiento
+- rellenar con el elemento k + 1 y el elemento longitud_serie - k - 1 respectivamente.
+- rellenar los primeros k elementos con una regresión lineal desde el primer elemento hasta el elemento k + 1. Lo mismo para los k elementos del final con una regresión lineal desde el elemento longitud_serie - k - 1 hasta el elemento longitud_serie.
+- Hibridación de los dos últimos
+
+Para poder calcular la tendencia en el conjunto de test teniendo en cuenta los datos de entrenamiento y que el tamaño de test es de 2 (por lo tanto no se pueden calcular medias móviles), se han propuesto dos alternativas:
+
+- Rellenar los valores de la tendencia con el último valor de la tendencia de train
+- Utilizar la regresión lineal que se ha construido con los últimos valores de la serie en train para predecirlos en test
 
 
 ```{r}
-k <- 1
-filtro <- rep(
-    1/((k*2) + 1),
-    (k*2) + 1
-)
+# Function to get MA-(k*2 + 1) of a series
+ma.series <- function(series, k) {
+    filtro <- rep(
+        1/((k*2) + 1),
+        (k*2) + 1
+    )
+    
+    return(filter(series, filter = filtro, sides = 2, method = "convolution"))
+}
 
-trend.estimated.train <- filter(serie.ts.train, filter = filtro, sides = 2, method = "convolution")
+# Function to plot original series and trend of the series for train and test
+plot.ma.series <- function(
+        train_series,
+        test_series,
+        train_trend,
+        test_trend,
+        train_times,
+        test_times
+) {
+    plot.ts(train_series, xlim=c(1, test_times[length(test_times)]))
+    lines(train_times, train_trend, col="blue")
+    lines(test_times, test_series, col="red")
+    lines(test_times, test_trend, col="green")
+}
+```
 
-# Manteniendo el valor más próximo
-trend.estimated.train[1:k] <- trend.estimated.train[k+1]
-trend.estimated.train[(length(trend.estimated.train) - 1):length(trend.estimated.train)] <- trend.estimated.train[length(trend.estimated.train) - k]
 
-trend.estimated.test <- ts(
+```{r}
+# MA-3 manteniendo valores próximos
+k.h1 <- 1
+
+trend.estimated.train.h1 <- ma.series(serie.ts.train, k.h1)
+
+trend.estimated.train.h1[1:k.h1] <- trend.estimated.train.h1[k.h1+1]
+trend.estimated.train.h1[(length(trend.estimated.train.h1) - 1):length(trend.estimated.train.h1)] <- trend.estimated.train.h1[length(trend.estimated.train.h1) - k.h1]
+
+trend.estimated.test.h1 <- ts(
     rep(
-        trend.estimated.train[length(trend.estimated.train)],
+        trend.estimated.train.h1[length(trend.estimated.train.h1)],
         test.size
     ),
-    start = length(trend.estimated.train) + 1,
-    end = length(trend.estimated.train) + 2
+    start = length(trend.estimated.train.h1) + 1,
+    end = length(trend.estimated.train.h1) + 2
 )
 
-# Regresión lineal y dando el valor mas próximo para test
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h1,
+    trend.estimated.test.h1,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+```
 
-first_n_lm <- lm(serie.ts.train[1:(k+1)] ~ serie.ts.train.time[1:(k+1)])
-trend.estimated.train[1] <- first_n_lm$fitted.values[1]
-trend.estimated.train[2] <- first_n_lm$fitted.values[2]
+```{r}
+# MA-5 manteniendo valores próximos
+k.h2 <- 2
 
+trend.estimated.train.h2 <- ma.series(serie.ts.train, k.h2)
+
+trend.estimated.train.h2[1:k.h2] <- trend.estimated.train.h2[k.h2+1]
+trend.estimated.train.h2[(length(trend.estimated.train.h2) - 1):length(trend.estimated.train.h2)] <- trend.estimated.train.h2[length(trend.estimated.train.h2) - k.h2]
+
+trend.estimated.test.h2 <- ts(
+    rep(
+        trend.estimated.train.h2[length(trend.estimated.train.h2)],
+        test.size
+    ),
+    start = length(trend.estimated.train.h2) + 1,
+    end = length(trend.estimated.train.h2) + 2
+)
+
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h2,
+    trend.estimated.test.h2,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+```
+
+```{r}
+# MA-3 regresión lineal para los k valores del principio y del final
+k.h3 <- 1
+
+trend.estimated.train.h3 <- ma.series(serie.ts.train, k.h3)
+
+# regresión utilizando los 3 primeros valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
+first_n_lm <- lm(serie.ts.train[1:(k.h3+2)] ~ serie.ts.train.time[1:(k.h3+2)])
+trend.estimated.train.h3[1] <- first_n_lm$fitted.values[1]
+
+# regresión utilizando los 3 ultimos valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
 last_n_lm <- lm(
-    serie.ts.train[(length(serie.ts.train) - k):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - k):length(serie.ts.train)]
+    serie.ts.train[(length(serie.ts.train) - k.h3 - 1):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - k.h3 - 1):length(serie.ts.train)]
 )
-trend.estimated.train[length(serie.ts.train) - 1] <- last_n_lm$fitted.values[2]
-trend.estimated.train[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
+trend.estimated.train.h3[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
 
-trend.estimated.test <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
+# prediccion test con la regresión lineal de los ultimos k valores
+trend.estimated.test.h3 <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
 
-# Regresion para los puntos del final y test. MA-3
-trend.estimated.train[1] <- trend.estimated.train[2]
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h3,
+    trend.estimated.test.h3,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+```
 
+```{r}
+# MA-5 regresión lineal para los k valores del principio y del final
+k.h4 <- 2
+
+trend.estimated.train.h4 <- ma.series(serie.ts.train, k.h4)
+
+# regresión utilizando los 3 primeros valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
+first_n_lm <- lm(serie.ts.train[1:(k.h4+1)] ~ serie.ts.train.time[1:(k.h4+1)])
+trend.estimated.train.h4[1] <- first_n_lm$fitted.values[1]
+trend.estimated.train.h4[2] <- first_n_lm$fitted.values[2]
+
+# regresión utilizando los 3 ultimos valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
 last_n_lm <- lm(
-    serie.ts.train[(length(serie.ts.train) - 2):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - 2):length(serie.ts.train)]
+    serie.ts.train[(length(serie.ts.train) - k.h4 - 1):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - k.h4 - 1):length(serie.ts.train)]
 )
-trend.estimated.train[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
-trend.estimated.test <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
+trend.estimated.train.h4[length(serie.ts.train) - 1] <- last_n_lm$fitted.values[2]
+trend.estimated.train.h4[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
 
+# prediccion test con la regresión lineal de los ultimos k valores
+trend.estimated.test.h4 <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
 
-plot.ts(serie.ts.train, xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)]))
-lines(serie.ts.train.time, trend.estimated.train, col="blue")
-lines(serie.ts.test.time, serie.ts.test, col="red")
-lines(serie.ts.test.time, trend.estimated.test, col="green")
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h4,
+    trend.estimated.test.h4,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+```
+
+```{r}
+# MA-3 regresión lineal para los k valores del final. Mantener valores en el principio
+k.h5 <- 1
+
+trend.estimated.train.h5 <- ma.series(serie.ts.train, k.h5)
+trend.estimated.train.h5[1:k.h5] <- trend.estimated.train.h5[k.h5+1]
+
+# regresión utilizando los 3 ultimos valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
+last_n_lm <- lm(
+    serie.ts.train[(length(serie.ts.train) - k.h5 - 1):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - k.h5 - 1):length(serie.ts.train)]
+)
+trend.estimated.train.h5[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
+
+# prediccion test con la regresión lineal de los ultimos k valores
+trend.estimated.test.h5 <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
+
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h5,
+    trend.estimated.test.h5,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+```
+
+```{r}
+# MA-5 regresión lineal para los k valores del final. Mantener valores en el principio
+k.h6 <- 2
+
+trend.estimated.train.h6 <- ma.series(serie.ts.train, k.h6)
+trend.estimated.train.h6[1:k.h6] <- trend.estimated.train.h6[k.h6+1]
+
+# regresión utilizando los 3 ultimos valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
+last_n_lm <- lm(
+    serie.ts.train[(length(serie.ts.train) - k.h6 - 1):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - k.h6 - 1):length(serie.ts.train)]
+)
+trend.estimated.train.h6[length(serie.ts.train) - 1] <- last_n_lm$fitted.values[2]
+trend.estimated.train.h6[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
+
+# prediccion test con la regresión lineal de los ultimos k valores
+trend.estimated.test.h6 <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
+
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h6,
+    trend.estimated.test.h6,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
 ```
 
 No existen diferencias significativas en los errores de train y test cuando se modela la tendencia con un filtro de medias móviles.
@@ -149,7 +319,7 @@ serie.ts.test.without.trend <- serie.ts.test - trend.estimated.test
 plot.ts(
     serie.ts.train.without.trend,
     xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)]),
-    ylim=c(-1.5, 2.5)
+    ylim=c(-1, 1.5)
 )
 lines(serie.ts.test.time, serie.ts.test.without.trend, col="red")
 ```
@@ -225,6 +395,7 @@ lines(valoresAjustados, col="blue")
 lines(serie.ts.test.time, serie.ts.test.without.trend, col="red")
 lines(serie.ts.test.time, predictions, col="blue")
 ```
+
 
 ```{r}
 Box.test(arima.model$residuals)
