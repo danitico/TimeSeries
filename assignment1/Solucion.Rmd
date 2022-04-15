@@ -110,6 +110,18 @@ plot.ma.series <- function(
     lines(test_times, test_series, col="red")
     lines(test_times, test_trend, col="green")
 }
+
+# Function to check the hypothesis of the trend
+trend.check.hypothesis <- function(
+    train_series,
+    test_series,
+    train_trend,
+    test_trend
+) {
+    print(jarque.bera.test(train_trend - train_series))
+    print(jarque.bera.test(test_trend - test_series))
+    print(t.test(c(train_trend - train_series, test_trend - test_series)))
+}
 ```
 
 
@@ -139,6 +151,16 @@ plot.ma.series(
     serie.ts.train.time,
     serie.ts.test.time
 )
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h1,
+    trend.estimated.test.h1
+)
+
+serie.ts.train.without.trend.h1 <- serie.ts.train - trend.estimated.train.h1
+serie.ts.test.without.trend.h1 <- serie.ts.test - trend.estimated.test.h1
 ```
 
 ```{r}
@@ -167,6 +189,16 @@ plot.ma.series(
     serie.ts.train.time,
     serie.ts.test.time
 )
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h2,
+    trend.estimated.test.h2
+)
+
+serie.ts.train.without.trend.h2 <- serie.ts.train - trend.estimated.train.h2
+serie.ts.test.without.trend.h2 <- serie.ts.test - trend.estimated.test.h2
 ```
 
 ```{r}
@@ -202,6 +234,16 @@ plot.ma.series(
     serie.ts.train.time,
     serie.ts.test.time
 )
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h3,
+    trend.estimated.test.h3
+)
+
+serie.ts.train.without.trend.h3 <- serie.ts.train - trend.estimated.train.h3
+serie.ts.test.without.trend.h3 <- serie.ts.test - trend.estimated.test.h3
 ```
 
 ```{r}
@@ -239,6 +281,16 @@ plot.ma.series(
     serie.ts.train.time,
     serie.ts.test.time
 )
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h4,
+    trend.estimated.test.h4
+)
+
+serie.ts.train.without.trend.h4 <- serie.ts.train - trend.estimated.train.h4
+serie.ts.test.without.trend.h4 <- serie.ts.test - trend.estimated.test.h4
 ```
 
 ```{r}
@@ -268,6 +320,16 @@ plot.ma.series(
     serie.ts.train.time,
     serie.ts.test.time
 )
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h5,
+    trend.estimated.test.h5
+)
+
+serie.ts.train.without.trend.h5 <- serie.ts.train - trend.estimated.train.h5
+serie.ts.test.without.trend.h5 <- serie.ts.test - trend.estimated.test.h5
 ```
 
 ```{r}
@@ -298,66 +360,63 @@ plot.ma.series(
     serie.ts.train.time,
     serie.ts.test.time
 )
-```
 
-No existen diferencias significativas en los errores de train y test cuando se modela la tendencia con un filtro de medias móviles.
-
-
-```{r}
-jarque.bera.test(trend.estimated.train - serie.ts.train)
-jarque.bera.test(trend.estimated.test - serie.ts.test)
-t.test(c(trend.estimated.train - serie.ts.train, trend.estimated.test - serie.ts.test))
-```
-
-
-A continuación se procede a eliminar la tendencia de la serie
-
-```{r}
-serie.ts.train.without.trend <- serie.ts.train - trend.estimated.train
-serie.ts.test.without.trend <- serie.ts.test - trend.estimated.test
-
-plot.ts(
-    serie.ts.train.without.trend,
-    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)]),
-    ylim=c(-1, 1.5)
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h6,
+    trend.estimated.test.h6
 )
-lines(serie.ts.test.time, serie.ts.test.without.trend, col="red")
+
+serie.ts.train.without.trend.h6 <- serie.ts.train - trend.estimated.train.h6
+serie.ts.test.without.trend.h6 <- serie.ts.test - trend.estimated.test.h6
 ```
 
-A continuación se procede a revisar el gráfico ACF de la serie para ver si se ha eliminado correctamente la tendencia de la serie, y por lo tanto, se ha modelado bien.
+Como se pueden ver en todas las hipótesis, no existen diferencias significativas en los errores de train y test cuando se modela la tendencia con cada hipótesis.
 
+A continuación se procede a observar los ACF de cada hipótesis para observar si se ha borrado y modelado correctamente la tendencia
 
 ```{r}
-acf(serie.ts.train.without.trend)
+acf(serie.ts.train.without.trend.h1)
+acf(serie.ts.train.without.trend.h2)
+acf(serie.ts.train.without.trend.h3)
+acf(serie.ts.train.without.trend.h4)
+acf(serie.ts.train.without.trend.h5)
+acf(serie.ts.train.without.trend.h6)
 ```
+
+Visualmente se puede observar que se ha eliminado ese escalonado que existía anteriormente a borrar la tendencia de la serie original. Por lo tanto, por el momento se pueden dar por válidas todas las hipótesis.
 
 
 ## Estacionalidad
 
-```{r}
-#seasonality_feature <- decompose(serie.ts)$seasonal
+Revisando todos los ACF anteriores donde se ha eliminado la tendencia no se observa en ningún momento ningún patrón que
+se repita cada x tiempo, por lo tanto no se va a modelar la estacionalidad.
 
-#serie.ts.train.without.trend.season <- serie.ts.train.without.trend - seasonality_feature[1:length(serie.ts.train.without.trend)]
+Aunque al principio se estableció a priori una frecuencia de 5 en los datos y el gráfico que generaba STL decía una estacionalidad cada 5, esto se debe principalmente a la frecuencia arbitraria que se fijó al principio.
 
-#serie.ts.test.without.trend.season <- serie.ts.test.without.trend - seasonality_feature[(length(serie.ts.train.without.trend) + 1):length(serie.ts)]
-
-#plot.ts(
-#    serie.ts.train.without.trend.season,
-#    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
-#)
-#lines(serie.ts.test.time, serie.ts.test.without.trend.season, col="red")
-```
+De todas maneras, en la siguiente sección donde se comprueba si la serie actual es estacionaria se podrá ver si se ha cometido algún error diciendo que la serie no tiene una componente estacional.
 
 ## Estacionareidad
 
-```{r}
-adf.test(serie.ts.train.without.trend)
-acf(serie.ts.train.without.trend)
+En esta sección se comprueba si la serie es estacionaria, lo cual es indispensable si queremos entrenar un modelo ARIMA donde se especifica el order p, d, q.
 
-#serie.ts.train.without.trend.diff <- diff(serie.ts.train.without.trend)
-#adf.test(serie.ts.train.without.trend.diff)
-#acf(serie.ts.train.without.trend.diff)
+Las series estacionarias son aquellas cuyas propiedades no dependen del momento en el que se observa la serie. Por lo tanto, por su definición, las series estacionarias no contienen ni tendencia ni estacionalidad.
+
+Para comprobar que realmente estamos ante una serie estacionaria, se ejecuta el test estadístico de Dickey-Fuller aumentado. Si el p-value es menor que 0.05 estamos ante una serie estacionaria mientras que en el caso contrario, no lo sería y habría que diferenciar para obtener una serie de este tipo.
+
+A continuación se prueban las diferentes series temporales que se han obtenido con cada hipótesis
+
+```{r}
+adf.test(serie.ts.train.without.trend.h1)
+adf.test(serie.ts.train.without.trend.h2)
+adf.test(serie.ts.train.without.trend.h3)
+adf.test(serie.ts.train.without.trend.h4)
+adf.test(serie.ts.train.without.trend.h5)
+adf.test(serie.ts.train.without.trend.h6)
 ```
+
+En este caso, todas las series temporales generadas por cada hipótesis son estacionarias, por lo que la hipótesis de que no había estacionalidad era real. Una vez que se sabe que son estacionarias, se procede a entrenar los modelos arima.
 
 # Modelo ARIMA
 
