@@ -29,7 +29,7 @@ serie.ts <- ts(serie, frequency = 5)
 plot(serie.ts)
 ```
 
-En el siguiente gráfico se puede observar la serie temporal descompuesta en tendencia, estacionalidad y el componente irregular. En el resto se puede apreciar que la varianza apenas varía a lo largo de la serie. Por lo tanto no habría que aplicar transformaciones de tipo logarítmica a esta serie.
+En el siguiente gráfico se puede observar la serie temporal descompuesta en tendencia, estacionalidad y el componente irregular. En la componente irregular se puede apreciar que la varianza apenas varía a lo largo de la serie. Por lo tanto no habría que aplicar transformaciones de tipo logarítmica a esta serie.
 
 ```{r}
 serie.ts.decomposed <- decompose(serie.ts)
@@ -80,10 +80,10 @@ Como se ha visto en la descomposición aditiva de la serie, la tendencia no es l
 - rellenar los primeros k elementos con una regresión lineal desde el primer elemento hasta el elemento k + 1. Lo mismo para los k elementos del final con una regresión lineal desde el elemento longitud_serie - k - 1 hasta el elemento longitud_serie.
 - Hibridación de los dos últimos
 
-Para poder calcular la tendencia en el conjunto de test teniendo en cuenta los datos de entrenamiento y que el tamaño de test es de 2 (por lo tanto no se pueden calcular medias móviles), se han propuesto dos alternativas:
+Para poder calcular la tendencia en el conjunto de test teniendo en cuenta los datos de entrenamiento, el tamaño de test es de 2 y que modelar un modelo de medias móviles en el "futuro" es difícil, se han propuesto dos alternativas:
 
-- Rellenar los valores de la tendencia con el último valor de la tendencia de train
-- Utilizar la regresión lineal que se ha construido con los últimos valores de la serie en train para predecirlos en test
+- Rellenar los valores de la tendencia con el último valor de la tendencia de entrenamiento
+- Utilizar la regresión lineal que se ha construido con los últimos valores de la serie en entrenamiento para predecirlos en test
 
 
 ```{r}
@@ -397,7 +397,7 @@ acf(serie.ts.train.without.trend.h5)
 acf(serie.ts.train.without.trend.h6)
 ```
 
-Visualmente se puede observar que se ha eliminado ese escalonado que existía anteriormente a borrar la tendencia de la serie original. Por lo tanto, por el momento se pueden dar por válidas todas las hipótesis.
+Visualmente se puede observar que se ha eliminado ese escalonado que existía anteriormente a borrar la tendencia de la serie original. Por lo tanto, se pueden dar por válidas todas las hipótesis.
 
 
 ### Estacionalidad
@@ -407,11 +407,11 @@ se repita cada x tiempo, por lo tanto no se va a modelar la estacionalidad.
 
 Aunque al principio se estableció a priori una frecuencia de 5 en los datos y el gráfico que generaba STL decía una estacionalidad cada 5, esto se debe principalmente a la frecuencia arbitraria que se fijó al principio.
 
-De todas maneras, en la siguiente sección donde se comprueba si la serie actual es estacionaria se podrá ver si se ha cometido algún error diciendo que la serie no tiene una componente estacional.
+Sin embargo, en la siguiente sección donde se comprueba si la serie actual es estacionaria se podrá ver si se ha cometido algún error diciendo que la serie no tiene una componente estacional.
 
-## Estacionareidad
+### Estacionareidad
 
-En esta sección se comprueba si la serie es estacionaria, lo cual es indispensable si queremos entrenar un modelo ARIMA donde se especifica el order p, d, q.
+En esta sección se comprueba si la serie es estacionaria, lo cual es indispensable si se quiere entrenar un modelo ARIMA donde se especifica el order p, d, q.
 
 Las series estacionarias son aquellas cuyas propiedades no dependen del momento en el que se observa la serie. Por lo tanto, por su definición, las series estacionarias no contienen ni tendencia ni estacionalidad.
 
@@ -446,7 +446,7 @@ Estos rangos se representan en los gráficos ACF y PACF como una línea disconti
 
 ### Modelo con la serie temporal generada por la hipótesis 1
 
-Como se puede ver en el gráfico PACF, hay 6 valores que están fuera del rango, por que el orden de p es 6. Respecto al orden de q, solo hay dos valores que sobrepasan ese rango, por lo que será 2.
+Como se puede ver en el gráfico PACF, hay 6 valores que están fuera del rango, por que el orden de p es 6. Respecto al orden de q, solo hay 2 valores que sobrepasan ese rango, por lo que será 2.
 
 ```{r}
 acf(serie.ts.train.without.trend.h1)
@@ -492,7 +492,7 @@ cat("RMSE train:", errorTrain.h1, "\nRMSE test:", errorTest.h1, "\nAIC:", aic.h1
 
 ### Modelo con la serie temporal generada por la hipótesis 2
 
-Como se puede ver en el gráfico PACF, hay 3 valores que están fuera del rango, por que el orden de p es 3. Respecto al orden de q, solo hay tres valores que sobrepasan ese rango, por lo que será 3.
+Como se puede ver en el gráfico PACF, hay 3 valores que están fuera del rango, por que el orden de p es 3. Respecto al orden de q, solo hay 3 valores que sobrepasan ese rango, por lo que será 3.
 
 ```{r}
 acf(serie.ts.train.without.trend.h2)
@@ -714,7 +714,7 @@ lines(density(arima.model.h6$residuals))
 Finalmente, para tener una serie de métricas que permitan comparar varios modelos, se va a calcular el error cuadrático medio para train y test además del criterio de información de Akaike para el modelo. Las tres métricas son a minimizar.
 
 ```{r}
-errorTrain.h6 <- sqrt(mean((valoresAjustados.h5 - serie.ts.train)^2))
+errorTrain.h6 <- sqrt(mean((valoresAjustados.h6 - serie.ts.train)^2))
 errorTest.h6 <- sqrt(mean((predictions.h6 - serie.ts.test)^2))
 aic.h6 <- AIC(arima.model.h6)
 cat("RMSE train:", errorTrain.h6, "\nRMSE test:", errorTest.h6, "\nAIC:", aic.h6)
@@ -743,7 +743,7 @@ kable(table)
 
 Como se puede ver en esta tabla, se ha hecho un resumen de los distintos modelos que se han realizado especificando el orden que se ha establecido y el resultado de los test estadísticos y de las métricas que se han obtenido.
 
-Revisando los RMSE que se han obtenido en train y test, el mejor modelo de todos es el modelo 3 (que se ha entrenado teniendo en cuenta que la tendencia se ha modelado según la hipótesis 3). Aunque es el segundo modelo más simple según el criterio de información de Akaike, es el mejor de todos en predecir los siguientes dos valores además de ajustarse correctamente a los datos de entrenamiento.
+Revisando los RMSE que se han obtenido en entrenamiento y test, el mejor modelo de todos es el modelo 3 (que se ha entrenado teniendo en cuenta que la tendencia se ha modelado según la hipótesis 3). Aunque es el segundo modelo más simple según el criterio de información de Akaike, es el mejor de todos en predecir los siguientes dos valores además de ajustarse correctamente a los datos de entrenamiento.
 
 Por lo tanto, se va a utilizar la configuración del modelo 3 para predecir los dos siguientes valores de la serie, objetivo principal de esta práctica.
 
@@ -769,6 +769,15 @@ trend.estimated[length(serie.ts)] <- last_n_lm$fitted.values[3]
 trend.estimated.prediction <- last_n_lm$coefficients[1] + c(97, 98)*last_n_lm$coefficients[2]
 
 serie.ts.without.trend <- serie.ts - trend.estimated
+```
+
+```{r}
+plot.ts(serie.ts[1:96], xlim=c(1, length(serie.ts)))
+lines(1:length(serie.ts), trend.estimated, col="blue")
+```
+
+```{r}
+plot.ts(serie.ts.without.trend)
 ```
 
 ### ARIMA
