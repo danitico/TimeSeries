@@ -1,0 +1,805 @@
+---
+title: "solucion"
+author: "Daniel Ranchal Parrado"
+date: "`r Sys.Date()`"
+output:
+    html_notebook: default
+    pdf_document: default
+---
+
+```{r}
+require(tseries)
+require(DAAG)
+require(knitr)
+```
+
+## Carga de los datos y preprocesamiento
+
+Si se observa el contenido del fichero, se puede inferir que hay 5 observaciones por unidad de tiempo siendo cada línea una unidad de tiempo. El objetivo es predecir los dos siguientes valores de esta serie temporal.
+
+```{r engine='bash', comment=''}
+cat dataseries.dat
+```
+
+Primero se lee el fichero con la función scan. A continuación se construye un objeto de serie temporal ts especificando los datos del fichero y la frecuencia de la serie, que en principio asumimos que es 5.
+
+```{r}
+serie <- scan("dataseries.dat")
+serie.ts <- ts(serie, frequency = 5)
+plot(serie.ts)
+```
+
+En el siguiente gráfico se puede observar la serie temporal descompuesta en tendencia, estacionalidad y el componente irregular. En la componente irregular se puede apreciar que la varianza apenas varía a lo largo de la serie. Por lo tanto no habría que aplicar transformaciones de tipo logarítmica a esta serie.
+
+```{r}
+serie.ts.decomposed <- decompose(serie.ts)
+plot(serie.ts.decomposed)
+```
+
+## División del problema en entrenamiento y test
+
+A continuación se procede a dividir el conjunto de datos en dos, uno para entrenamiento y otro para test. Siempre
+se recomienda que el tamaño del conjunto de test tenga al menos el mismo tamaño que los valores siguientes que queremos predecir de la serie. Como en este caso se pide que se calculen los dos siguientes valores, se fijará un conjunto de test de dos elementos.
+En el siguiente gráfico se puede ver en color negro los datos de entrenamiento y en color rojo los datos de test.
+
+
+```{r}
+test.size = 2
+
+serie.ts.train <- serie.ts[1:(length(serie.ts) - test.size)]
+serie.ts.train.time <- 1:length(serie.ts.train)
+
+serie.ts.test <- serie.ts[(length(serie.ts) - test.size + 1):length(serie.ts)]
+serie.ts.test.time <- (serie.ts.train.time[length(serie.ts.train.time)] + 1):(serie.ts.train.time[length(serie.ts.train.time)] + test.size)
+
+plot.ts(serie.ts.train)
+lines(serie.ts.test.time, serie.ts.test, col="red")
+```
+
+## Análisis de la serie
+
+En esta sección se procede a analizar la serie de manera visual. Como se puede observar en la descomposición de la serie temporal, se aprecia tendencia en la serie temporal. Sin embargo, en las siguientes secciones se podrá ver en el gráfico ACF si estamos en lo cierto.
+
+Respecto a la estacionalidad, en la componente "seasonal" se ha asumido una estacionalidad cada 5 unidades de tiempo, tal y como se ha especificado al crear el objeto ts. De todas maneras, habrá que comprobar esta hipótesis comprobando el gráfico ACF de la serie.
+
+```{r}
+plot(serie.ts.decomposed)
+```
+
+### Tendencia
+
+Primero de todo, vamos a ver el gráfico de autocorrelación de la serie para comprobar que realmente existe tendencia en ella. Como se puede observar, los valores en cada lag se reducen "lentamente", indicativo de que existe tendencia.
+
+```{r}
+acf(serie.ts.train)
+```
+
+Como se ha visto en la descomposición aditiva de la serie, la tendencia no es lineal y por lo tanto habrá que modelarla de otra manera. En este caso se va a estimar con un filtro de medias móviles con k = 1 y con k = 2. Para evitar el problema que puede tener este método con los primeros y últimos k valores que no se pueden calcular se van a proponer los siguientes métodos:
+
+- rellenar con el elemento k + 1 y el elemento longitud_serie - k - 1 respectivamente.
+- rellenar los primeros k elementos con una regresión lineal desde el primer elemento hasta el elemento k + 1. Lo mismo para los k elementos del final con una regresión lineal desde el elemento longitud_serie - k - 1 hasta el elemento longitud_serie.
+- Hibridación de los dos últimos
+
+Para poder calcular la tendencia en el conjunto de test teniendo en cuenta los datos de entrenamiento, el tamaño de test es de 2 y que modelar un modelo de medias móviles en el "futuro" es difícil, se han propuesto dos alternativas:
+
+- Rellenar los valores de la tendencia con el último valor de la tendencia de entrenamiento
+- Utilizar la regresión lineal que se ha construido con los últimos valores de la serie en entrenamiento para predecirlos en test
+
+
+```{r}
+# Function to get MA-(k*2 + 1) of a series
+ma.series <- function(series, k) {
+    filtro <- rep(
+        1/((k*2) + 1),
+        (k*2) + 1
+    )
+    
+    return(filter(series, filter = filtro, sides = 2, method = "convolution"))
+}
+
+# Function to plot original series and trend of the series for train and test
+plot.ma.series <- function(
+        train_series,
+        test_series,
+        train_trend,
+        test_trend,
+        train_times,
+        test_times
+) {
+    plot.ts(train_series, xlim=c(1, test_times[length(test_times)]))
+    lines(train_times, train_trend, col="blue")
+    lines(test_times, test_series, col="red")
+    lines(test_times, test_trend, col="green")
+}
+
+# Function to check the hypothesis of the trend
+trend.check.hypothesis <- function(
+    train_series,
+    test_series,
+    train_trend,
+    test_trend
+) {
+    print(jarque.bera.test(train_trend - train_series))
+    print(jarque.bera.test(test_trend - test_series))
+    print(t.test(c(train_trend - train_series, test_trend - test_series)))
+}
+```
+
+#### Hipótesis 1
+
+```{r}
+# MA-3 manteniendo valores próximos
+k.h1 <- 1
+
+trend.estimated.train.h1 <- ma.series(serie.ts.train, k.h1)
+
+trend.estimated.train.h1[1:k.h1] <- trend.estimated.train.h1[k.h1+1]
+trend.estimated.train.h1[(length(trend.estimated.train.h1) - 1):length(trend.estimated.train.h1)] <- trend.estimated.train.h1[length(trend.estimated.train.h1) - k.h1]
+
+trend.estimated.test.h1 <- ts(
+    rep(
+        trend.estimated.train.h1[length(trend.estimated.train.h1)],
+        test.size
+    ),
+    start = length(trend.estimated.train.h1) + 1,
+    end = length(trend.estimated.train.h1) + 2
+)
+
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h1,
+    trend.estimated.test.h1,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h1,
+    trend.estimated.test.h1
+)
+
+serie.ts.train.without.trend.h1 <- serie.ts.train - trend.estimated.train.h1
+serie.ts.test.without.trend.h1 <- serie.ts.test - trend.estimated.test.h1
+```
+
+#### Hipótesis 2
+
+```{r}
+# MA-5 manteniendo valores próximos
+k.h2 <- 2
+
+trend.estimated.train.h2 <- ma.series(serie.ts.train, k.h2)
+
+trend.estimated.train.h2[1:k.h2] <- trend.estimated.train.h2[k.h2+1]
+trend.estimated.train.h2[(length(trend.estimated.train.h2) - 1):length(trend.estimated.train.h2)] <- trend.estimated.train.h2[length(trend.estimated.train.h2) - k.h2]
+
+trend.estimated.test.h2 <- ts(
+    rep(
+        trend.estimated.train.h2[length(trend.estimated.train.h2)],
+        test.size
+    ),
+    start = length(trend.estimated.train.h2) + 1,
+    end = length(trend.estimated.train.h2) + 2
+)
+
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h2,
+    trend.estimated.test.h2,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h2,
+    trend.estimated.test.h2
+)
+
+serie.ts.train.without.trend.h2 <- serie.ts.train - trend.estimated.train.h2
+serie.ts.test.without.trend.h2 <- serie.ts.test - trend.estimated.test.h2
+```
+
+#### Hipótesis 3
+
+```{r}
+# MA-3 regresión lineal para los k valores del principio y del final
+k.h3 <- 1
+
+trend.estimated.train.h3 <- ma.series(serie.ts.train, k.h3)
+
+# regresión utilizando los 3 primeros valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
+first_n_lm <- lm(serie.ts.train[1:(k.h3+2)] ~ serie.ts.train.time[1:(k.h3+2)])
+trend.estimated.train.h3[1] <- first_n_lm$fitted.values[1]
+
+# regresión utilizando los 3 ultimos valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
+last_n_lm <- lm(
+    serie.ts.train[(length(serie.ts.train) - k.h3 - 1):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - k.h3 - 1):length(serie.ts.train)]
+)
+trend.estimated.train.h3[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
+
+# prediccion test con la regresión lineal de los ultimos k valores
+trend.estimated.test.h3 <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
+
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h3,
+    trend.estimated.test.h3,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h3,
+    trend.estimated.test.h3
+)
+
+serie.ts.train.without.trend.h3 <- serie.ts.train - trend.estimated.train.h3
+serie.ts.test.without.trend.h3 <- serie.ts.test - trend.estimated.test.h3
+```
+
+#### Hipótesis 4
+
+```{r}
+# MA-5 regresión lineal para los k valores del principio y del final
+k.h4 <- 2
+
+trend.estimated.train.h4 <- ma.series(serie.ts.train, k.h4)
+
+# regresión utilizando los 3 primeros valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
+first_n_lm <- lm(serie.ts.train[1:(k.h4+1)] ~ serie.ts.train.time[1:(k.h4+1)])
+trend.estimated.train.h4[1] <- first_n_lm$fitted.values[1]
+trend.estimated.train.h4[2] <- first_n_lm$fitted.values[2]
+
+# regresión utilizando los 3 ultimos valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
+last_n_lm <- lm(
+    serie.ts.train[(length(serie.ts.train) - k.h4 - 1):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - k.h4 - 1):length(serie.ts.train)]
+)
+trend.estimated.train.h4[length(serie.ts.train) - 1] <- last_n_lm$fitted.values[2]
+trend.estimated.train.h4[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
+
+# prediccion test con la regresión lineal de los ultimos k valores
+trend.estimated.test.h4 <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
+
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h4,
+    trend.estimated.test.h4,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h4,
+    trend.estimated.test.h4
+)
+
+serie.ts.train.without.trend.h4 <- serie.ts.train - trend.estimated.train.h4
+serie.ts.test.without.trend.h4 <- serie.ts.test - trend.estimated.test.h4
+```
+
+#### Hipótesis 5
+
+```{r}
+# MA-3 regresión lineal para los k valores del final. Mantener valores en el principio
+k.h5 <- 1
+
+trend.estimated.train.h5 <- ma.series(serie.ts.train, k.h5)
+trend.estimated.train.h5[1:k.h5] <- trend.estimated.train.h5[k.h5+1]
+
+# regresión utilizando los 3 ultimos valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
+last_n_lm <- lm(
+    serie.ts.train[(length(serie.ts.train) - k.h5 - 1):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - k.h5 - 1):length(serie.ts.train)]
+)
+trend.estimated.train.h5[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
+
+# prediccion test con la regresión lineal de los ultimos k valores
+trend.estimated.test.h5 <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
+
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h5,
+    trend.estimated.test.h5,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h5,
+    trend.estimated.test.h5
+)
+
+serie.ts.train.without.trend.h5 <- serie.ts.train - trend.estimated.train.h5
+serie.ts.test.without.trend.h5 <- serie.ts.test - trend.estimated.test.h5
+```
+
+#### Hipótesis 6
+
+```{r}
+# MA-5 regresión lineal para los k valores del final. Mantener valores en el principio
+k.h6 <- 2
+
+trend.estimated.train.h6 <- ma.series(serie.ts.train, k.h6)
+trend.estimated.train.h6[1:k.h6] <- trend.estimated.train.h6[k.h6+1]
+
+# regresión utilizando los 3 ultimos valores
+# Cuando k=1 -> 3 valores
+# Cuando k=2 -> 3 valores
+# Cuando k=3 -> 4 valores
+last_n_lm <- lm(
+    serie.ts.train[(length(serie.ts.train) - k.h6 - 1):length(serie.ts.train)] ~ serie.ts.train.time[(length(serie.ts.train) - k.h6 - 1):length(serie.ts.train)]
+)
+trend.estimated.train.h6[length(serie.ts.train) - 1] <- last_n_lm$fitted.values[2]
+trend.estimated.train.h6[length(serie.ts.train)] <- last_n_lm$fitted.values[3]
+
+# prediccion test con la regresión lineal de los ultimos k valores
+trend.estimated.test.h6 <- last_n_lm$coefficients[1] + serie.ts.test.time*last_n_lm$coefficients[2]
+
+plot.ma.series(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h6,
+    trend.estimated.test.h6,
+    serie.ts.train.time,
+    serie.ts.test.time
+)
+
+trend.check.hypothesis(
+    serie.ts.train,
+    serie.ts.test,
+    trend.estimated.train.h6,
+    trend.estimated.test.h6
+)
+
+serie.ts.train.without.trend.h6 <- serie.ts.train - trend.estimated.train.h6
+serie.ts.test.without.trend.h6 <- serie.ts.test - trend.estimated.test.h6
+```
+
+Como se pueden ver en todas las hipótesis, no existen diferencias significativas en los errores de train y test cuando se modela la tendencia con cada hipótesis.
+
+A continuación se procede a observar los ACF de cada hipótesis para observar si se ha borrado y modelado correctamente la tendencia
+
+```{r}
+acf(serie.ts.train.without.trend.h1)
+acf(serie.ts.train.without.trend.h2)
+acf(serie.ts.train.without.trend.h3)
+acf(serie.ts.train.without.trend.h4)
+acf(serie.ts.train.without.trend.h5)
+acf(serie.ts.train.without.trend.h6)
+```
+
+Visualmente se puede observar que se ha eliminado ese escalonado que existía anteriormente a borrar la tendencia de la serie original. Por lo tanto, se pueden dar por válidas todas las hipótesis.
+
+
+### Estacionalidad
+
+Revisando todos los ACF anteriores donde se ha eliminado la tendencia no se observa en ningún momento ningún patrón que
+se repita cada x tiempo, por lo tanto no se va a modelar la estacionalidad.
+
+Aunque al principio se estableció a priori una frecuencia de 5 en los datos y el gráfico que generaba STL decía una estacionalidad cada 5, esto se debe principalmente a la frecuencia arbitraria que se fijó al principio.
+
+Sin embargo, en la siguiente sección donde se comprueba si la serie actual es estacionaria se podrá ver si se ha cometido algún error diciendo que la serie no tiene una componente estacional.
+
+### Estacionareidad
+
+En esta sección se comprueba si la serie es estacionaria, lo cual es indispensable si se quiere entrenar un modelo ARIMA donde se especifica el order p, d, q.
+
+Las series estacionarias son aquellas cuyas propiedades no dependen del momento en el que se observa la serie. Por lo tanto, por su definición, las series estacionarias no contienen ni tendencia ni estacionalidad.
+
+Para comprobar que realmente estamos ante una serie estacionaria, se ejecuta el test estadístico de Dickey-Fuller aumentado. Si el p-value es menor que 0.05 estamos ante una serie estacionaria mientras que en el caso contrario, no lo sería y habría que diferenciar para obtener una serie de este tipo.
+
+A continuación se prueban las diferentes series temporales que se han obtenido con cada hipótesis
+
+```{r}
+adf.test(serie.ts.train.without.trend.h1)
+adf.test(serie.ts.train.without.trend.h2)
+adf.test(serie.ts.train.without.trend.h3)
+adf.test(serie.ts.train.without.trend.h4)
+adf.test(serie.ts.train.without.trend.h5)
+adf.test(serie.ts.train.without.trend.h6)
+```
+
+En este caso, todas las series temporales generadas por cada hipótesis son estacionarias, por lo que la hipótesis de que no había estacionalidad era real. Una vez que se sabe que son estacionarias, se procede a entrenar los modelos arima.
+
+## Modelos ARIMA
+
+A continuación se va a entrenar un modelo con cada serie temporal que ha generado cada hipótesis. Para cada modelo ARIMA hay que establecer el orden del modelo autorregresivo, el grado de diferenciación y el orden del modelo de medias móviles. De antemano, para todos los modelos que se van a entrenar el grado de diferenciación va a ser 0 ya que no ha hecho falta diferenciar la serie para que fuera estacionaria.
+
+Por norma general, el orden de p es el número de valores en el PACF que no están en el rango:
+$$[-\frac{2}{\sqrt{N}}, \frac{2}{\sqrt{N}}]$$
+donde N es la longitud de la serie.
+
+Es muy similar para obtener el orden de q, que es el número de valores en el ACF que no están en el rango:
+$$[-\frac{2}{\sqrt{N}}, \frac{2}{\sqrt{N}}]$$
+donde N es la longitud de la serie.
+
+Estos rangos se representan en los gráficos ACF y PACF como una línea discontinua azul.
+
+### Modelo con la serie temporal generada por la hipótesis 1
+
+Como se puede ver en el gráfico PACF, hay 6 valores que están fuera del rango, por que el orden de p es 6. Respecto al orden de q, solo hay 2 valores que sobrepasan ese rango, por lo que será 2.
+
+```{r}
+acf(serie.ts.train.without.trend.h1)
+pacf(serie.ts.train.without.trend.h1)
+```
+
+```{r}
+arima.model.h1 <- arima(
+    serie.ts.train.without.trend.h1,
+    order = c(6, 0, 2)
+)
+
+valoresAjustados.h1 <- serie.ts.train.without.trend.h1 + arima.model.h1$residuals + trend.estimated.train.h1
+predictions.h1 <- predict(arima.model.h1, n.ahead = 2)$pred + trend.estimated.test.h1
+
+# Representación de los valores ajustados y la predicción
+plot.ts(
+    serie.ts.train,
+    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
+)
+lines(valoresAjustados.h1, col="blue")
+lines(serie.ts.test.time, serie.ts.test, col="red")
+lines(serie.ts.test.time, predictions.h1, col="blue")
+```
+
+A continuación se comprueba la bondad del modelo construido. Para ello se va a ejecutar el test estadístico de Box-Pierce (para comprobar si los residuos son aleatorios) y los test estadísticos de Shapiro-wilk y jarque-bera (para comprobar si los residuos siguen una distribución normal). Si en alguno de estos test estadísticos se rechaza la hipótesis nula, estamos ante un mal modelo.
+
+```{r}
+Box.test(arima.model.h1$residuals)
+jarque.bera.test(arima.model.h1$residuals)
+shapiro.test(arima.model.h1$residuals)
+hist(arima.model.h1$residuals, col="blue", prob=T)
+lines(density(arima.model.h1$residuals))
+```
+Finalmente, para tener una serie de métricas que permitan comparar varios modelos, se va a calcular el error cuadrático medio para train y test además del criterio de información de Akaike para el modelo. Las tres métricas son a minimizar.
+
+```{r}
+errorTrain.h1 <- sqrt(mean((valoresAjustados.h1 - serie.ts.train)^2))
+errorTest.h1 <- sqrt(mean((predictions.h1 - serie.ts.test)^2))
+aic.h1 <- AIC(arima.model.h1)
+cat("RMSE train:", errorTrain.h1, "\nRMSE test:", errorTest.h1, "\nAIC:", aic.h1)
+```
+
+### Modelo con la serie temporal generada por la hipótesis 2
+
+Como se puede ver en el gráfico PACF, hay 3 valores que están fuera del rango, por que el orden de p es 3. Respecto al orden de q, solo hay 3 valores que sobrepasan ese rango, por lo que será 3.
+
+```{r}
+acf(serie.ts.train.without.trend.h2)
+pacf(serie.ts.train.without.trend.h2)
+```
+
+```{r}
+arima.model.h2 <- arima(
+    serie.ts.train.without.trend.h2,
+    order = c(3, 0, 3)
+)
+
+valoresAjustados.h2 <- serie.ts.train.without.trend.h2 + arima.model.h2$residuals + trend.estimated.train.h2
+predictions.h2 <- predict(arima.model.h2, n.ahead = 2)$pred + trend.estimated.test.h2
+
+# Representación de los valores ajustados y la predicción
+plot.ts(
+    serie.ts.train,
+    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
+)
+lines(valoresAjustados.h2, col="blue")
+lines(serie.ts.test.time, serie.ts.test, col="red")
+lines(serie.ts.test.time, predictions.h2, col="blue")
+```
+
+A continuación se comprueba la bondad del modelo construido. Para ello se va a ejecutar el test estadístico de Box-Pierce (para comprobar si los residuos son aleatorios) y los test estadísticos de Shapiro-wilk y jarque-bera (para comprobar si los residuos siguen una distribución normal). Si en alguno de estos test estadísticos se rechaza la hipótesis nula, estamos ante un mal modelo.
+
+```{r}
+Box.test(arima.model.h2$residuals)
+jarque.bera.test(arima.model.h2$residuals)
+shapiro.test(arima.model.h2$residuals)
+hist(arima.model.h2$residuals, col="blue", prob=T)
+lines(density(arima.model.h2$residuals))
+```
+Finalmente, para tener una serie de métricas que permitan comparar varios modelos, se va a calcular el error cuadrático medio para train y test además del criterio de información de Akaike para el modelo. Las tres métricas son a minimizar.
+
+```{r}
+errorTrain.h2 <- sqrt(mean((valoresAjustados.h2 - serie.ts.train)^2))
+errorTest.h2 <- sqrt(mean((predictions.h2 - serie.ts.test)^2))
+aic.h2 <- AIC(arima.model.h2)
+cat("RMSE train:", errorTrain.h2, "\nRMSE test:", errorTest.h2, "\nAIC:", aic.h2)
+```
+
+### Modelo con la serie temporal generada por la hipótesis 3
+
+Como se puede ver en el gráfico PACF, hay 6 valores que están fuera del rango, por que el orden de p es 6. Respecto al orden de q, solo hay tres valores que sobrepasan ese rango, por lo que será 3.
+
+```{r}
+acf(serie.ts.train.without.trend.h3)
+pacf(serie.ts.train.without.trend.h3)
+```
+
+```{r}
+arima.model.h3 <- arima(
+    serie.ts.train.without.trend.h3,
+    order = c(6, 0, 3)
+)
+
+valoresAjustados.h3 <- serie.ts.train.without.trend.h3 + arima.model.h3$residuals + trend.estimated.train.h3
+predictions.h3 <- predict(arima.model.h3, n.ahead = 2)$pred + trend.estimated.test.h3
+
+# Representación de los valores ajustados y la predicción
+plot.ts(
+    serie.ts.train,
+    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
+)
+lines(valoresAjustados.h3, col="blue")
+lines(serie.ts.test.time, serie.ts.test, col="red")
+lines(serie.ts.test.time, predictions.h3, col="blue")
+```
+
+A continuación se comprueba la bondad del modelo construido. Para ello se va a ejecutar el test estadístico de Box-Pierce (para comprobar si los residuos son aleatorios) y los test estadísticos de Shapiro-wilk y jarque-bera (para comprobar si los residuos siguen una distribución normal). Si en alguno de estos test estadísticos se rechaza la hipótesis nula, estamos ante un mal modelo.
+
+```{r}
+Box.test(arima.model.h3$residuals)
+jarque.bera.test(arima.model.h3$residuals)
+shapiro.test(arima.model.h3$residuals)
+hist(arima.model.h3$residuals, col="blue", prob=T)
+lines(density(arima.model.h3$residuals))
+```
+Finalmente, para tener una serie de métricas que permitan comparar varios modelos, se va a calcular el error cuadrático medio para train y test además del criterio de información de Akaike para el modelo. Las tres métricas son a minimizar.
+
+```{r}
+errorTrain.h3 <- sqrt(mean((valoresAjustados.h3 - serie.ts.train)^2))
+errorTest.h3 <- sqrt(mean((predictions.h3 - serie.ts.test)^2))
+aic.h3 <- AIC(arima.model.h3)
+cat("RMSE train:", errorTrain.h3, "\nRMSE test:", errorTest.h3, "\nAIC:", aic.h3)
+```
+
+### Modelo con la serie temporal generada por la hipótesis 4
+
+Como se puede ver en el gráfico PACF, hay 4 valores que están fuera del rango, por que el orden de p es 4. Respecto al orden de q, solo hay tres valores que sobrepasan ese rango, por lo que será 3.
+
+```{r}
+acf(serie.ts.train.without.trend.h4)
+pacf(serie.ts.train.without.trend.h4)
+```
+
+```{r}
+arima.model.h4 <- arima(
+    serie.ts.train.without.trend.h4,
+    order = c(4, 0, 3)
+)
+
+valoresAjustados.h4 <- serie.ts.train.without.trend.h4 + arima.model.h4$residuals + trend.estimated.train.h4
+predictions.h4 <- predict(arima.model.h4, n.ahead = 2)$pred + trend.estimated.test.h4
+
+# Representación de los valores ajustados y la predicción
+plot.ts(
+    serie.ts.train,
+    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
+)
+lines(valoresAjustados.h4, col="blue")
+lines(serie.ts.test.time, serie.ts.test, col="red")
+lines(serie.ts.test.time, predictions.h4, col="blue")
+```
+
+A continuación se comprueba la bondad del modelo construido. Para ello se va a ejecutar el test estadístico de Box-Pierce (para comprobar si los residuos son aleatorios) y los test estadísticos de Shapiro-wilk y jarque-bera (para comprobar si los residuos siguen una distribución normal). Si en alguno de estos test estadísticos se rechaza la hipótesis nula, estamos ante un mal modelo.
+
+```{r}
+Box.test(arima.model.h4$residuals)
+jarque.bera.test(arima.model.h4$residuals)
+shapiro.test(arima.model.h4$residuals)
+hist(arima.model.h4$residuals, col="blue", prob=T)
+lines(density(arima.model.h4$residuals))
+```
+Finalmente, para tener una serie de métricas que permitan comparar varios modelos, se va a calcular el error cuadrático medio para train y test además del criterio de información de Akaike para el modelo. Las tres métricas son a minimizar.
+
+```{r}
+errorTrain.h4 <- sqrt(mean((valoresAjustados.h4 - serie.ts.train)^2))
+errorTest.h4 <- sqrt(mean((predictions.h4 - serie.ts.test)^2))
+aic.h4 <- AIC(arima.model.h4)
+cat("RMSE train:", errorTrain.h4, "\nRMSE test:", errorTest.h4, "\nAIC:", aic.h4)
+```
+
+### Modelo con la serie temporal generada por la hipótesis 5
+
+Como se puede ver en el gráfico PACF, hay 5 valores que están fuera del rango, por que el orden de p es 5. Respecto al orden de q, solo hay dos valores que sobrepasan ese rango, por lo que será 2.
+
+```{r}
+acf(serie.ts.train.without.trend.h5)
+pacf(serie.ts.train.without.trend.h5)
+```
+
+```{r}
+arima.model.h5 <- arima(
+    serie.ts.train.without.trend.h5,
+    order = c(5, 0, 2)
+)
+
+valoresAjustados.h5 <- serie.ts.train.without.trend.h5 + arima.model.h5$residuals + trend.estimated.train.h5
+predictions.h5 <- predict(arima.model.h5, n.ahead = 2)$pred + trend.estimated.test.h5
+
+# Representación de los valores ajustados y la predicción
+plot.ts(
+    serie.ts.train,
+    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
+)
+lines(valoresAjustados.h5, col="blue")
+lines(serie.ts.test.time, serie.ts.test, col="red")
+lines(serie.ts.test.time, predictions.h5, col="blue")
+```
+
+A continuación se comprueba la bondad del modelo construido. Para ello se va a ejecutar el test estadístico de Box-Pierce (para comprobar si los residuos son aleatorios) y los test estadísticos de Shapiro-wilk y jarque-bera (para comprobar si los residuos siguen una distribución normal). Si en alguno de estos test estadísticos se rechaza la hipótesis nula, estamos ante un mal modelo.
+
+```{r}
+Box.test(arima.model.h5$residuals)
+jarque.bera.test(arima.model.h5$residuals)
+shapiro.test(arima.model.h5$residuals)
+hist(arima.model.h5$residuals, col="blue", prob=T)
+lines(density(arima.model.h5$residuals))
+```
+Finalmente, para tener una serie de métricas que permitan comparar varios modelos, se va a calcular el error cuadrático medio para train y test además del criterio de información de Akaike para el modelo. Las tres métricas son a minimizar.
+
+```{r}
+errorTrain.h5 <- sqrt(mean((valoresAjustados.h5 - serie.ts.train)^2))
+errorTest.h5 <- sqrt(mean((predictions.h5 - serie.ts.test)^2))
+aic.h5 <- AIC(arima.model.h5)
+cat("RMSE train:", errorTrain.h5, "\nRMSE test:", errorTest.h5, "\nAIC:", aic.h5)
+```
+
+### Modelo con la serie temporal generada por la hipótesis 6
+
+Como se puede ver en el gráfico PACF, hay 4 valores que están fuera del rango, por que el orden de p es 4. Respecto al orden de q, solo hay tres valores que sobrepasan ese rango, por lo que será 3.
+
+```{r}
+acf(serie.ts.train.without.trend.h6)
+pacf(serie.ts.train.without.trend.h6)
+```
+
+```{r}
+arima.model.h6 <- arima(
+    serie.ts.train.without.trend.h6,
+    order = c(4, 0, 3)
+)
+
+valoresAjustados.h6 <- serie.ts.train.without.trend.h6 + arima.model.h6$residuals + trend.estimated.train.h6
+predictions.h6 <- predict(arima.model.h6, n.ahead = 2)$pred + trend.estimated.test.h6
+
+# Representación de los valores ajustados y la predicción
+plot.ts(
+    serie.ts.train,
+    xlim=c(1, serie.ts.test.time[length(serie.ts.test.time)])
+)
+lines(valoresAjustados.h6, col="blue")
+lines(serie.ts.test.time, serie.ts.test, col="red")
+lines(serie.ts.test.time, predictions.h6, col="blue")
+```
+
+A continuación se comprueba la bondad del modelo construido. Para ello se va a ejecutar el test estadístico de Box-Pierce (para comprobar si los residuos son aleatorios) y los test estadísticos de Shapiro-wilk y jarque-bera (para comprobar si los residuos siguen una distribución normal). Si en alguno de estos test estadísticos se rechaza la hipótesis nula, estamos ante un mal modelo.
+
+```{r}
+Box.test(arima.model.h6$residuals)
+jarque.bera.test(arima.model.h6$residuals)
+shapiro.test(arima.model.h6$residuals)
+hist(arima.model.h6$residuals, col="blue", prob=T)
+lines(density(arima.model.h6$residuals))
+```
+Finalmente, para tener una serie de métricas que permitan comparar varios modelos, se va a calcular el error cuadrático medio para train y test además del criterio de información de Akaike para el modelo. Las tres métricas son a minimizar.
+
+```{r}
+errorTrain.h6 <- sqrt(mean((valoresAjustados.h6 - serie.ts.train)^2))
+errorTest.h6 <- sqrt(mean((predictions.h6 - serie.ts.test)^2))
+aic.h6 <- AIC(arima.model.h6)
+cat("RMSE train:", errorTrain.h6, "\nRMSE test:", errorTest.h6, "\nAIC:", aic.h6)
+```
+### Resumen modelos
+
+```{r echo=FALSE, results='asis'}
+table <- data.frame(
+    Modelo=c("Modelo 1", "Modelo 2", "Modelo 3", "Modelo 4", "Modelo 5", "Modelo 6"),
+    Orden=c("6, 0, 2", "3, 0, 3", "6, 0, 3", "4, 0, 3", "5, 0, 2", "4, 0, 3"),
+    "¿Box-pierce?"=c("Sí", "Sí", "Sí", "Sí", "Sí", "Sí"),
+    "¿Jarque-bera?"=c("Sí", "Sí", "Sí", "Sí", "Sí", "Sí"),
+    "¿Shafiro-wilk?"=c("Sí", "Sí", "Sí", "Sí", "Sí", "Sí"),
+    "RMSE Train"=c(
+        errorTrain.h1, errorTrain.h2, errorTrain.h3, errorTrain.h4, errorTrain.h5, errorTrain.h6
+    ),
+    "RMSE Test"=c(
+        errorTest.h1, errorTest.h2, errorTest.h3, errorTest.h4, errorTest.h5, errorTest.h6
+    ),
+    "AIC"=c(aic.h1, aic.h2, aic.h3, aic.h4, aic.h5, aic.h6),
+    check.names = F
+)
+
+kable(table)
+```
+
+Como se puede ver en esta tabla, se ha hecho un resumen de los distintos modelos que se han realizado especificando el orden que se ha establecido y el resultado de los test estadísticos y de las métricas que se han obtenido.
+
+Revisando los RMSE que se han obtenido en entrenamiento y test, el mejor modelo de todos es el modelo 3 (que se ha entrenado teniendo en cuenta que la tendencia se ha modelado según la hipótesis 3). Aunque es el segundo modelo más simple según el criterio de información de Akaike, es el mejor de todos en predecir los siguientes dos valores además de ajustarse correctamente a los datos de entrenamiento.
+
+Por lo tanto, se va a utilizar la configuración del modelo 3 para predecir los dos siguientes valores de la serie, objetivo principal de esta práctica.
+
+## Predicción de los dos siguientes valores
+
+### Tendencia
+
+```{r}
+trend.estimated <- ma.series(
+    serie.ts, k=1
+)
+
+serie.ts.time <- 1:length(serie.ts)
+
+first_n_lm <- lm(serie.ts[1:(1+2)] ~ serie.ts.time[1:(1+2)])
+trend.estimated[1] <- first_n_lm$fitted.values[1]
+
+last_n_lm <- lm(
+    serie.ts[(length(serie.ts) - 1 - 1):length(serie.ts)] ~ serie.ts.time[(length(serie.ts) - 1 - 1):length(serie.ts)]
+)
+trend.estimated[length(serie.ts)] <- last_n_lm$fitted.values[3]
+
+trend.estimated.prediction <- last_n_lm$coefficients[1] + c(97, 98)*last_n_lm$coefficients[2]
+
+serie.ts.without.trend <- serie.ts - trend.estimated
+```
+
+```{r}
+plot.ts(serie.ts[1:96], xlim=c(1, length(serie.ts)))
+lines(1:length(serie.ts), trend.estimated, col="blue")
+```
+
+```{r}
+plot.ts(serie.ts.without.trend)
+```
+
+### ARIMA
+
+```{r}
+arima.model.final <- arima(
+    serie.ts.without.trend,
+    order = c(6, 0, 3)
+)
+
+final.predictions <- predict(arima.model.final, n.ahead = 2)$pred
+```
+
+### Obtención de los valores y gráfica final
+
+Las predicciones de los dos valores siguientes son: 580.1493 y 580.4179
+
+```{r}
+predictions.with.trend <- final.predictions + trend.estimated.prediction
+
+plot.ts(
+    serie.ts[1:96]
+)
+lines(97:98, predictions.with.trend, col="blue")
+```
